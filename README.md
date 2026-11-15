@@ -1,25 +1,26 @@
 # BringMeJobs
 
-Local-first AI job discovery and application assistant.
+Local-first job discovery and review dashboard. The main idea is to automatically query the
+most prestigious or high-paying tech companies in Europe to find new engineering job listings
+so the good jobs end up on my table rather than me going through dozens of websites every day.
 
-The project is currently in the planning/foundation stage. See [BUILD_PLAN.md](./BUILD_PLAN.md) for the implementation contract that coding agents must follow.
+## Run locally
 
-## Product boundary
+```bash
+python3 bringmejobs.py migrate
+python3 -m src.dispatcher
+python3 bringmejobs.py serve
+```
 
-BringMeJobs discovers and ranks jobs, explains fit, estimates compensation with uncertainty, and prepares application drafts. It does not submit applications without explicit user approval.
+Open `http://127.0.0.1:6767` (SIX-SEVEEEEN).
 
-## Planned local URL
+Use **Config** to add and edit official careers pages or permitted JSON feeds.
+The search pipeline filters European engineering roles, currently excludes senior and
+early-career listings, deduplicates results, and stores run logs in SQLite.
+Config also includes source-access health checks and timestamps.
 
-`http://127.0.0.1:6767`
+The initial catalog contains 50 curated technology, AI, hardware, and fintech
+companies. Local databases, logs, uploads, and environment files are ignored
+by Git.
 
-## Planned provider strategy
-
-- Local model first.
-- Optional OpenAI/xAI-compatible provider for difficult or user-requested tasks.
-- Token and cost budgets enforced per run.
-
-## OpenAI $10 build credit
-
-The $10 balance should be enough for a meaningful MVP build and several polish/debugging cycles if used carefully, especially with caching, short prompts, structured outputs, and cheaper models. It is not a safe budget for repeatedly sending full repositories, CVs, job pages, and long browser traces to a premium model.
-
-Keep the API key in a local environment file or operating-system secret store. Never commit it.
+BringMeJobs does not submit applications for now.

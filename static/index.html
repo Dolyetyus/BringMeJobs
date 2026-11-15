@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BringMeJobs</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar"><div class="brand"><a href="/">BringMeJobs</a><nav><a class="nav-link active" href="/">Jobs</a><a class="nav-link" href="/config">Config</a></nav></div><button id="run-search"><svg aria-hidden="true"><use href="#icon-refresh"></use></svg>Run search</button></header>
+  <main>
+    <section class="hero"><div><h2>Find the roles worth your attention.</h2><p>European engineering jobs from your configured sources.</p></div><div class="stats"><strong id="job-count">0</strong><span>matching jobs</span></div></section>
+    <div id="notice" class="notice" hidden></div>
+    <section class="toolbar"><div class="tabs"><button class="tab active" data-status="">All</button><button class="tab" data-status="new">New</button><button class="tab" data-status="saved">Saved</button><button class="tab" data-status="archived">Archived</button></div><button id="refresh" class="secondary">Refresh</button></section>
+    <section id="jobs" class="jobs"></section>
+    <section class="panel"><div class="panel-heading"><h3>Recent search runs</h3></div><div id="runs"></div></section>
+  </main>
+  <svg class="icon-sprite" aria-hidden="true"><symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"/></symbol></svg>
+  <script src="/app.js"></script>
+</body>
+</html>
