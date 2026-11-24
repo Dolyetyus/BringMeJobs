@@ -12,16 +12,41 @@
     <section class="page-heading"><div><h2>Company sources</h2><p>Configure the official careers pages used by the daily search.</p></div><button id="add-company" class="secondary"><svg aria-hidden="true"><use href="#icon-plus"></use></svg>Add company</button></section>
     <div id="notice" class="notice" hidden></div>
     <section class="panel filter-panel">
-      <div class="panel-heading"><h3>Job title filters</h3></div>
+      <div class="panel-heading"><h3>Search filters</h3></div>
+      <fieldset class="filter-options">
+        <legend>Automatic exclusions</legend>
+        <label>
+          <input id="exclude-senior" type="checkbox">
+          <span class="filter-option-copy">
+            <strong>Exclude senior positions</strong>
+            <small>Senior, Staff, Principal, Lead, Manager, and similar titles.</small>
+          </span>
+        </label>
+        <label>
+          <input id="exclude-early-career" type="checkbox">
+          <span class="filter-option-copy">
+            <strong>Exclude early-career positions</strong>
+            <small>Internships, graduate roles, and new-grad positions.</small>
+          </span>
+        </label>
+        <label>
+          <input id="exclude-non-european" type="checkbox">
+          <span class="filter-option-copy">
+            <strong>Exclude non-European positions</strong>
+            <small>Only fetch Europe-based roles.</small>
+          </span>
+        </label>
+      </fieldset>
+      <h4 class="filter-section-title">Custom title patterns</h4>
       <div class="filter-grid">
-        <label>Include patterns
+        <label>Include custom patterns
           <input id="include-terms" placeholder="engineer, AI, software">
         </label>
-        <label>Exclude patterns
-          <input id="exclude-terms" placeholder="*intern*,*graduate*">
+        <label>Exclude custom patterns
+          <input id="exclude-terms" placeholder="*contractor*,*commission-only*">
         </label>
       </div>
-      <p class="muted">Comma-separated title patterns. Wildcards such as <code>*intern*</code> are supported.</p>
+      <p class="muted">Comma-separated patterns with optional wildcards, e.g. <code>*platform*</code>. Custom patterns are independent of the automatic exclusions above. Leave Include blank to match any title.</p>
     </section>
     <section class="panel config-panel"><div class="config-head"><span>Company</span><span>Careers page or feed</span><span>Type</span><span>Access</span><span></span></div><div id="company-rows"></div></section>
   </main>

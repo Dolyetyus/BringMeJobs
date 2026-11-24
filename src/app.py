@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from urllib.error import HTTPError, URLError
 from html.parser import HTMLParser
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -43,17 +43,13 @@ EUROPE_CITIES = {
     "rome", "stockholm", "tallinn", "the hague", "vienna", "warsaw",
     "zurich",
 }
-ROLE_TERMS = (
-    "software engineer", "software developer", "backend", "frontend", "full stack",
-    "machine learning", "ai engineer", "applied ai", "data engineer",
-    "forward deployed", "systems engineer", "infrastructure", "platform engineer",
-)
-SENIOR_TERMS = (
+DEFAULT_INCLUDE_PATTERNS = "engineer, AI, software"
+SENIOR_TITLE_TERMS = (
     "senior", "staff", "principal", "lead", "manager", "director", "head of",
     "vice president", " vp ", "architect",
 )
-EARLY_CAREER_EXCLUSIONS = (
-    "intern", "internship", "new grad", "new graduate",
+EARLY_CAREER_TITLE_TERMS = (
+    "intern", "internship", "new grad", "new graduate", "graduate",
 )
 COMPANIES = [
     "Google", "Amazon", "Microsoft", "Apple", "Meta", "Netflix", "NVIDIA",
@@ -118,9 +114,12 @@ def migrate(db: sqlite3.Connection) -> None:
           status TEXT NOT NULL, changed_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS search_config (
-          id INTEGER PRIMARY KEY CHECK(id = 1), locations TEXT NOT NULL,
-          role_terms TEXT NOT NULL, excluded_terms TEXT NOT NULL, max_age_days INTEGER NOT NULL,
-          schedule TEXT NOT NULL
+          id INTEGER PRIMARY KEY CHECK(id = 1),
+          include_terms TEXT NOT NULL DEFAULT 'engineer, AI, software',
+          exclude_terms TEXT NOT NULL DEFAULT '',
+          exclude_senior INTEGER NOT NULL DEFAULT 1,
+          exclude_early_career INTEGER NOT NULL DEFAULT 1,
+          exclude_non_european INTEGER NOT NULL DEFAULT 1
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_job_sources_company_url
           ON job_sources(company_id, url);
@@ -158,7 +157,10 @@ def migrate(db: sqlite3.Connection) -> None:
     config_columns = {row["name"] for row in db.execute("PRAGMA table_info(search_config)")}
     for column, definition in (
         ("include_terms", "TEXT NOT NULL DEFAULT 'engineer, AI, software'"),
-        ("exclude_terms", "TEXT NOT NULL DEFAULT '*intern*,*graduate*'"),
+        ("exclude_terms", "TEXT NOT NULL DEFAULT ''"),
+        ("exclude_senior", "INTEGER NOT NULL DEFAULT 1"),
+        ("exclude_early_career", "INTEGER NOT NULL DEFAULT 1"),
+        ("exclude_non_european", "INTEGER NOT NULL DEFAULT 1"),
     ):
         if column not in config_columns:
             db.execute(f"ALTER TABLE search_config ADD COLUMN {column} {definition}")
@@ -184,11 +186,35 @@ def migrate(db: sqlite3.Connection) -> None:
     if db.execute("SELECT 1 FROM job_sources WHERE source_type != 'fixture' LIMIT 1").fetchone():
         db.execute("UPDATE job_sources SET enabled=0 WHERE source_type='fixture'")
     db.execute(
-        """INSERT OR IGNORE INTO search_config(id, locations, role_terms, excluded_terms, max_age_days, schedule)
-           VALUES(1, ?, ?, ?, 30, '00:00')""",
-        ("London, Berlin, Amsterdam, Paris, Dublin, Zurich, Stockholm, Remote Europe",
-         ", ".join(ROLE_TERMS), ", ".join(SENIOR_TERMS)),
+        """INSERT OR IGNORE INTO search_config(
+             id, include_terms, exclude_terms, exclude_senior,
+             exclude_early_career, exclude_non_european
+           ) VALUES(1, ?, '', 1, 1, 1)""",
+        (DEFAULT_INCLUDE_PATTERNS,),
     )
+    if db.execute(
+        "SELECT 1 FROM app_meta WHERE key='filter_switches_v1'"
+    ).fetchone() is None:
+        # Move old built-in exclusions under the new switches, preserving custom patterns.
+        automatic_patterns = {
+            f"*{term.strip().lower()}*"
+            for term in (*SENIOR_TITLE_TERMS, *EARLY_CAREER_TITLE_TERMS)
+        }
+        config_row = db.execute(
+            "SELECT exclude_terms FROM search_config WHERE id=1"
+        ).fetchone()
+        remaining_patterns = [
+            pattern.strip()
+            for pattern in config_row["exclude_terms"].split(",")
+            if pattern.strip() and pattern.strip().lower() not in automatic_patterns
+        ]
+        db.execute(
+            "UPDATE search_config SET exclude_terms=? WHERE id=1",
+            (", ".join(remaining_patterns),),
+        )
+        db.execute(
+            "INSERT INTO app_meta(key, value) VALUES('filter_switches_v1', '1')"
+        )
     for job in db.execute("SELECT id, canonical_url, status FROM jobs").fetchall():
         key = canonical_url(job["canonical_url"])
         state = "saved" if job["status"] == "saved" else "discarded" if job["status"] in {"archived", "rejected"} else "discovery"
@@ -262,7 +288,7 @@ def parse_date(value: str | None) -> datetime | None:
         return None
 
 
-def source_jobs(source: sqlite3.Row, since: datetime) -> list[dict]:
+def source_jobs(source: sqlite3.Row) -> list[dict]:
     if source["source_type"] == "fixture":
         return [
             {"id": "fixture-1", "title": "Software Engineer, Developer Platform", "location": "Berlin, Germany",
@@ -447,49 +473,62 @@ def source_jobs(source: sqlite3.Row, since: datetime) -> list[dict]:
     return data
 
 
-def normalize_and_match(raw: dict, source: sqlite3.Row, config: sqlite3.Row) -> dict | None:
+def normalize_and_match(raw: dict, config: sqlite3.Row) -> dict | None:
     title = str(raw.get("title", "")).strip()
     location = str(raw.get("location", "")).strip()
     url = str(raw.get("url", "")).strip()
-    if not title or not location or not url:
-        raise ValueError("job requires title, location, and url")
+    if not title or not url or (not location and config["exclude_non_european"]):
+        raise ValueError(
+            "job requires title and url; location is required when excluding non-European listings"
+        )
     title_lower = f" {title.lower()} "
     location_lower = location.lower()
-    include_value = config["include_terms"] if "include_terms" in config.keys() else config["role_terms"]
-    exclude_value = config["exclude_terms"] if "exclude_terms" in config.keys() else config["excluded_terms"]
     include_patterns = [
         x.strip().lower()
-        for x in include_value.split(",")
+        for x in config["include_terms"].split(",")
         if x.strip()
-    ] or [x.strip().lower() for x in config["role_terms"].split(",") if x.strip()]
-    exclude_patterns = [
+    ]
+    custom_exclude_patterns = [
         x.strip().lower()
-        for x in exclude_value.split(",")
+        for x in config["exclude_terms"].split(",")
         if x.strip()
-    ] + [
-        x.strip().lower()
-        for x in config["excluded_terms"].split(",")
-        if x.strip()
-    ] + [term.strip().lower() for term in EARLY_CAREER_EXCLUSIONS]
+    ]
     role_hits = [
         pattern for pattern in include_patterns
         if fnmatch.fnmatchcase(title_lower, f"*{pattern.strip('*')}*")
     ]
-    senior_hits = [
-        pattern for pattern in exclude_patterns
+    custom_exclude_hits = [
+        pattern for pattern in custom_exclude_patterns
         if fnmatch.fnmatchcase(
             title_lower,
             pattern if "*" in pattern else f"*{pattern}*",
         )
     ]
+    senior_hits = [
+        term for term in SENIOR_TITLE_TERMS
+        if fnmatch.fnmatchcase(title_lower, f"*{term}*")
+    ] if config["exclude_senior"] else []
+    early_career_hits = [
+        term for term in EARLY_CAREER_TITLE_TERMS
+        if fnmatch.fnmatchcase(title_lower, f"*{term}*")
+    ] if config["exclude_early_career"] else []
     europe = (
         any(country in location_lower for country in EUROPE)
         or any(city in location_lower for city in EUROPE_CITIES)
         or "europe" in location_lower
+        or "emea" in location_lower
     )
-    if not role_hits or senior_hits or not europe:
+    if (
+        (include_patterns and not role_hits)
+        or custom_exclude_hits
+        or senior_hits
+        or early_career_hits
+        or (config["exclude_non_european"] and not europe)
+    ):
         return None
-    reasons = [f"role: {', '.join(role_hits[:3])}", "location: Europe"]
+    reasons = [f"role: {', '.join(role_hits[:3])}"] if role_hits else []
+    if europe:
+        reasons.append("location: Europe")
     score = min(100, 50 + len(role_hits) * 10)
     posted = str(raw.get("posted_at") or raw.get("updated_at") or now())
     source_job_id = str(raw.get("id") or hashlib.sha256(url.encode()).hexdigest()[:16])
@@ -522,13 +561,12 @@ def run_search(dry_run=False) -> dict:
                WHERE s.enabled=1 AND c.enabled=1
                ORDER BY lower(c.name), s.id"""
         ).fetchall()
-        since = datetime.now(timezone.utc) - timedelta(days=int(config["max_age_days"]))
         log_run(
             db,
             run_id,
             "configuration.loaded",
             f"Loaded search configuration and {len(sources)} enabled source(s)",
-            metadata={"source_count": len(sources), "max_age_days": config["max_age_days"]},
+            metadata={"source_count": len(sources)},
         )
         for source in sources:
             try:
@@ -539,7 +577,7 @@ def run_search(dry_run=False) -> dict:
                     f"Fetching {source['company_name']}",
                     metadata={"source_id": source["id"], "url": source["url"]},
                 )
-                raws = source_jobs(source, since)
+                raws = source_jobs(source)
                 log_run(
                     db,
                     run_id,
@@ -550,7 +588,7 @@ def run_search(dry_run=False) -> dict:
                 matched = 0
                 for raw in raws:
                     totals["fetched"] += 1
-                    normalized = normalize_and_match(raw, source, config)
+                    normalized = normalize_and_match(raw, config)
                     if not normalized:
                         continue
                     matched += 1
@@ -833,7 +871,12 @@ class Handler(BaseHTTPRequestHandler):
                     result.append(item)
                 return json_response(self, result)
             if parsed.path == "/api/config":
-                return json_response(self, dict(db.execute("SELECT * FROM search_config WHERE id=1").fetchone()))
+                row = db.execute(
+                    """SELECT include_terms, exclude_terms, exclude_senior,
+                              exclude_early_career, exclude_non_european
+                       FROM search_config WHERE id=1"""
+                ).fetchone()
+                return json_response(self, dict(row))
             if parsed.path == "/api/sources":
                 return json_response(self, [dict(r) for r in db.execute(
                     "SELECT s.*, c.name company_name FROM job_sources s JOIN companies c ON c.id=s.company_id ORDER BY c.name"
@@ -962,17 +1005,23 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, {"ok": True}, HTTPStatus.CREATED)
             if path == "/api/config":
                 current = db.execute("SELECT * FROM search_config WHERE id=1").fetchone()
+
+                def config_switch(name):
+                    value = payload.get(name, bool(current[name]))
+                    if not isinstance(value, bool):
+                        raise ValueError(f"{name} must be a boolean")
+                    return int(value)
+
                 db.execute(
-                    """UPDATE search_config SET locations=?, role_terms=?, excluded_terms=?,
-                       include_terms=?, exclude_terms=?, max_age_days=?, schedule=? WHERE id=1""",
+                    """UPDATE search_config SET include_terms=?, exclude_terms=?,
+                       exclude_senior=?, exclude_early_career=?, exclude_non_european=?
+                       WHERE id=1""",
                     (
-                        str(payload.get("locations", current["locations"])),
-                        str(payload.get("role_terms", current["role_terms"])),
-                        str(payload.get("excluded_terms", current["excluded_terms"])),
                         str(payload.get("include_terms", current["include_terms"])),
                         str(payload.get("exclude_terms", current["exclude_terms"])),
-                        int(payload.get("max_age_days", current["max_age_days"])),
-                        str(payload.get("schedule", current["schedule"])),
+                        config_switch("exclude_senior"),
+                        config_switch("exclude_early_career"),
+                        config_switch("exclude_non_european"),
                     ),
                 )
                 db.commit()

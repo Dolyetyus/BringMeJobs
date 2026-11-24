@@ -97,7 +97,7 @@ function renderJobs(jobs, container, saved = false) {
         </div>
         <h3>${escapeHtml(job.title)}</h3>
         <div class="meta">
-          ${escapeHtml(job.location)} · posted ${escapeHtml(formatPostedDate(job.posted_at))}
+          ${escapeHtml(job.location || "Location not specified")} · posted ${escapeHtml(formatPostedDate(job.posted_at))}
         </div>
         ${saved ? "" : `<div class="reasons">
           ${(job.match_reasons || []).map((reason) => `<span class="pill">${escapeHtml(reason)}</span>`).join("")}
@@ -233,10 +233,13 @@ async function loadConfig() {
   renderCompanies();
 }
 
-async function loadTitleFilters() {
+async function loadSearchConfig() {
   const config = await api("/api/config");
   $("#include-terms").value = config.include_terms || "";
   $("#exclude-terms").value = config.exclude_terms || "";
+  $("#exclude-senior").checked = Boolean(config.exclude_senior);
+  $("#exclude-early-career").checked = Boolean(config.exclude_early_career);
+  $("#exclude-non-european").checked = Boolean(config.exclude_non_european);
 }
 
 function collectCompanies() {
@@ -275,6 +278,9 @@ async function saveConfig() {
       body: JSON.stringify({
         include_terms: $("#include-terms").value,
         exclude_terms: $("#exclude-terms").value,
+        exclude_senior: $("#exclude-senior").checked,
+        exclude_early_career: $("#exclude-early-career").checked,
+        exclude_non_european: $("#exclude-non-european").checked,
       }),
     });
 
@@ -308,7 +314,7 @@ async function checkHealth() {
 
 function setupConfig() {
   loadConfig().catch((error) => show(error.message));
-  loadTitleFilters().catch((error) => show(error.message));
+  loadSearchConfig().catch((error) => show(error.message));
 
   $("#add-company").onclick = () => {
     state.companies.push({

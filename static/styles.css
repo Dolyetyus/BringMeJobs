@@ -412,6 +412,65 @@ p {
   padding: 18px;
 }
 
+.filter-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 22px;
+  padding: 0;
+  border: 0;
+}
+
+.filter-options legend {
+  grid-column: 1 / -1;
+  margin-bottom: 10px;
+  padding-bottom: 2px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.filter-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.filter-options input {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--red);
+}
+
+.filter-option-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.filter-option-copy strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.filter-option-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.filter-section-title {
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
 .filter-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -600,6 +659,11 @@ p {
   .job-controls input,
   .job-controls select {
     width: 100%;
+  }
+
+  .filter-options,
+  .filter-grid {
+    grid-template-columns: 1fr;
   }
 
   .config-head {

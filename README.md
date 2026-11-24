@@ -18,8 +18,8 @@ discard jobs from a simple web interface.
 
 - Add, edit, and remove company career pages or job feeds.
 - Check source access and view the last check status.
-- Search for job listings and filter them by European location and configurable
-  title include/exclude patterns.
+- Search for job listings with optional exclusions for senior, early-career, and
+  non-European roles, plus custom title include/exclude patterns.
 - Browse new listings in **Discovery**, save interesting roles, and discard
   listings you do not want to see again.
 - Deduplicate by canonical job URL. Discarded listings keep their identifier and
