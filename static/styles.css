@@ -1,11 +1,11 @@
 :root {
   font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   color: #241b1b;
-  background: #fffafa;
+  background: #f4f5f6;
   --red: #d92d39;
   --ink: #241b1b;
-  --muted: #806f70;
-  --line: #eadcdd;
+  --muted: #68717d;
+  --line: #dfe3e8;
 }
 
 * {
@@ -25,6 +25,35 @@ select {
 button {
   border: 0;
   cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgb(217 45 57 / 24%);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+button:active,
+.actions a:active {
+  transform: translateY(0);
+}
+
+button:disabled:hover {
+  box-shadow: none;
+  transform: none;
 }
 
 .topbar {
@@ -74,9 +103,16 @@ nav {
   gap: 8px;
   background: var(--red);
   color: #fff;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 11px 15px;
   font-weight: 700;
+}
+
+.topbar button:hover,
+#run-search:hover {
+  background: #bd2430;
+  box-shadow: 0 2px 6px rgb(36 27 27 / 14%);
+  transform: translateY(-1px);
 }
 
 .header-actions {
@@ -172,12 +208,17 @@ p {
 
 .jobs-toolbar {
   gap: 14px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(28 39 51 / 5%);
 }
 
 .job-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
 }
 
 .job-controls label {
@@ -186,15 +227,16 @@ p {
   gap: 8px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .job-controls input,
 .job-controls select {
   min-width: 0;
-  padding: 9px 10px;
+  height: 40px;
+  padding: 8px 11px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 7px;
   background: #fff;
   color: var(--ink);
   font-size: 14px;
@@ -202,11 +244,18 @@ p {
 }
 
 .job-controls input {
-  width: 250px;
+  width: min(320px, 36vw);
 }
 
 .job-controls select {
-  width: 160px;
+  width: 170px;
+}
+
+.job-controls input:focus,
+.job-controls select:focus {
+  border-color: var(--red);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(217 45 57 / 12%);
 }
 
 .tabs {
@@ -237,6 +286,11 @@ p {
   border-radius: 9px;
   background: #fff;
   color: var(--ink);
+}
+
+.secondary:hover {
+  border-color: #c7cdd4;
+  background: #f8f9fa;
 }
 
 .jobs {
@@ -318,10 +372,25 @@ p {
   color: #8f202a;
 }
 
+.actions button:hover,
+.icon-button:hover {
+  background: #f3dfe1;
+}
+
 .actions a {
   background: var(--red);
   color: #fff;
   text-decoration: none;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.actions a:hover {
+  background: #bd2430;
+  box-shadow: 0 2px 5px rgb(36 27 27 / 12%);
+  transform: translateY(-1px);
 }
 
 .panel {
@@ -434,7 +503,7 @@ p {
 
 .config-head {
   border-bottom: 1px solid var(--line);
-  background: #fff6f6;
+  background: #f7f8f9;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -487,6 +556,16 @@ p {
   border-radius: 8px;
   background: #f8eeee;
   color: #8f202a;
+}
+
+.icon-button:hover {
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
 }
 
 @media (max-width: 760px) {
