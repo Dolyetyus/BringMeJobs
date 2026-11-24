@@ -37,10 +37,7 @@ function show(message) {
 }
 
 async function loadJobs() {
-  const query = state.status
-    ? `?status=${encodeURIComponent(state.status)}`
-    : "";
-  const jobs = await api(`/api/jobs${query}`);
+  const jobs = await api("/api/discovery");
 
   $("#job-count").textContent = jobs.length;
   $("#jobs").innerHTML = jobs.length
@@ -61,7 +58,7 @@ async function loadJobs() {
         <div class="actions">
           <a href="${escapeHtml(job.url)}" target="_blank" rel="noreferrer">Open listing</a>
           <button data-job="${escapeHtml(job.id)}" data-status="saved">Save</button>
-          <button data-job="${escapeHtml(job.id)}" data-status="archived">Archive</button>
+          <button data-job="${escapeHtml(job.id)}" data-status="discarded">Discard</button>
         </div>
       </article>
     `).join("")
@@ -80,10 +77,37 @@ async function setStatus(id, status) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
-    await loadJobs();
   } catch (error) {
     show(error.message);
   }
+}
+
+async function loadSaved() {
+  const jobs = await api("/api/saved");
+  const container = $("#saved-jobs");
+
+  container.innerHTML = jobs.length
+    ? jobs.map((job) => `
+      <article class="card">
+        <div class="card-head">
+          <span class="company-name">${escapeHtml(job.company_name)}</span>
+        </div>
+        <h3>${escapeHtml(job.title)}</h3>
+        <div class="meta">${escapeHtml(job.location)}</div>
+        <p class="muted">${escapeHtml(job.description).slice(0, 180)}</p>
+        <div class="actions">
+          <a href="${escapeHtml(job.url)}" target="_blank" rel="noreferrer">Open listing</a>
+          <button data-job="${escapeHtml(job.id)}" data-status="discarded">Discard</button>
+        </div>
+      </article>
+    `).join("")
+    : `
+      <div class="card">
+        <h3>No saved jobs</h3>
+        <p class="muted">Saved listings will appear here.</p>
+      </div>
+    `;
+
 }
 
 async function loadRuns() {
@@ -171,6 +195,12 @@ async function loadConfig() {
   renderCompanies();
 }
 
+async function loadTitleFilters() {
+  const config = await api("/api/config");
+  $("#include-terms").value = config.include_terms || "";
+  $("#exclude-terms").value = config.exclude_terms || "";
+}
+
 function collectCompanies() {
   document.querySelectorAll(".company-row").forEach((row) => {
     const company = state.companies[Number(row.dataset.index)];
@@ -199,6 +229,14 @@ async function saveConfig() {
       body: JSON.stringify({
         companies: collectCompanies(),
         deleted_ids: state.deleted,
+      }),
+    });
+    await api("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        include_terms: $("#include-terms").value,
+        exclude_terms: $("#exclude-terms").value,
       }),
     });
 
@@ -232,6 +270,7 @@ async function checkHealth() {
 
 function setupConfig() {
   loadConfig().catch((error) => show(error.message));
+  loadTitleFilters().catch((error) => show(error.message));
 
   $("#add-company").onclick = () => {
     state.companies.push({
@@ -311,7 +350,17 @@ function setupDashboard() {
     const button = event.target.closest("[data-job]");
 
     if (button) {
-      setStatus(button.dataset.job, button.dataset.status);
+      setStatus(button.dataset.job, button.dataset.status).then(loadJobs);
+    }
+  });
+}
+
+function setupSaved() {
+  loadSaved().catch((error) => show(error.message));
+  $("#saved-jobs").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-job]");
+    if (button) {
+      setStatus(button.dataset.job, button.dataset.status).then(loadSaved);
     }
   });
 }
@@ -322,4 +371,8 @@ if ($("#company-rows")) {
 
 if ($("#jobs")) {
   setupDashboard();
+}
+
+if ($("#saved-jobs")) {
+  setupSaved();
 }

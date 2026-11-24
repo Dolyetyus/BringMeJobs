@@ -12,15 +12,21 @@ python3 -m src.dispatcher
 python3 bringmejobs.py serve
 ```
 
-Open `http://127.0.0.1:6767` (SIX-SEVEEEEN).
+Open `http://127.0.0.1:6767`.
 
-Use **Config** to add and edit official careers pages or permitted JSON feeds.
-The search pipeline filters European engineering roles, currently excludes senior and
-early-career listings, deduplicates results, and stores run logs in SQLite.
-Config also includes source-access health checks and timestamps.
+Use **Discovery** for new listings, **Saved Jobs** for retained listings, and
+**Config** for careers pages and configurable title filters.
+
+The search pipeline filters European engineering roles by include/exclude title
+patterns, deduplicates using canonical listing URLs, and stores run logs and
+source-health checks in SQLite. Discarded listings keep only their internal ID
+and URL key; saved listings retain full metadata.
 
 The initial catalog contains 50 curated technology, AI, hardware, and fintech
 companies. Local databases, logs, uploads, and environment files are ignored
 by Git.
 
 BringMeJobs does not submit applications for now.
+
+For Windows startup, register `scripts/windows-startup.ps1` in Task Scheduler.
+Adjust the WSL distro and repository path in the script if needed.

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -135,6 +136,13 @@ def migrate(db: sqlite3.Connection) -> None:
           message TEXT NOT NULL,
           metadata TEXT NOT NULL DEFAULT '{}'
         );
+        CREATE TABLE IF NOT EXISTS listing_keys (
+          id TEXT PRIMARY KEY,
+          key TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL DEFAULT 'seen',
+          first_seen_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         """
     )
     existing_source_columns = {
@@ -147,6 +155,13 @@ def migrate(db: sqlite3.Connection) -> None:
     ):
         if column not in existing_source_columns:
             db.execute(f"ALTER TABLE job_sources ADD COLUMN {column} {definition}")
+    config_columns = {row["name"] for row in db.execute("PRAGMA table_info(search_config)")}
+    for column, definition in (
+        ("include_terms", "TEXT NOT NULL DEFAULT 'engineer, AI, software'"),
+        ("exclude_terms", "TEXT NOT NULL DEFAULT '*intern*,*graduate*'"),
+    ):
+        if column not in config_columns:
+            db.execute(f"ALTER TABLE search_config ADD COLUMN {column} {definition}")
     db.executemany(
         "INSERT OR IGNORE INTO companies(name, created_at) VALUES (?, ?)",
         [(name, now()) for name in dict.fromkeys(COMPANIES)],
@@ -174,6 +189,16 @@ def migrate(db: sqlite3.Connection) -> None:
         ("London, Berlin, Amsterdam, Paris, Dublin, Zurich, Stockholm, Remote Europe",
          ", ".join(ROLE_TERMS), ", ".join(SENIOR_TERMS)),
     )
+    for job in db.execute("SELECT id, canonical_url, status FROM jobs").fetchall():
+        key = canonical_url(job["canonical_url"])
+        state = "saved" if job["status"] == "saved" else "discarded" if job["status"] in {"archived", "rejected"} else "discovery"
+        db.execute(
+            """INSERT OR IGNORE INTO listing_keys(id, key, state, first_seen_at, updated_at)
+               VALUES(?, ?, ?, ?, ?)""",
+            (job["id"], key, state, now(), now()),
+        )
+        if state == "discarded":
+            db.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
     db.commit()
 
 
@@ -219,6 +244,12 @@ def canonical_url(url: str) -> str:
 def job_id(source_id: int, source_job_id: str, url: str) -> str:
     key = f"{source_id}:{source_job_id}:{canonical_url(url)}"
     return hashlib.sha256(key.encode()).hexdigest()[:24]
+
+
+def listing_identity(url: str) -> tuple[str, str]:
+    key = canonical_url(url)
+    internal_id = hashlib.sha256(key.encode()).hexdigest()[:24]
+    return key, internal_id
 
 
 def parse_date(value: str | None) -> datetime | None:
@@ -330,14 +361,33 @@ def normalize_and_match(raw: dict, source: sqlite3.Row, config: sqlite3.Row) -> 
         raise ValueError("job requires title, location, and url")
     title_lower = f" {title.lower()} "
     location_lower = location.lower()
-    role_terms = [x.strip().lower() for x in config["role_terms"].split(",") if x.strip()]
-    excluded = [
+    include_value = config["include_terms"] if "include_terms" in config.keys() else config["role_terms"]
+    exclude_value = config["exclude_terms"] if "exclude_terms" in config.keys() else config["excluded_terms"]
+    include_patterns = [
+        x.strip().lower()
+        for x in include_value.split(",")
+        if x.strip()
+    ] or [x.strip().lower() for x in config["role_terms"].split(",") if x.strip()]
+    exclude_patterns = [
+        x.strip().lower()
+        for x in exclude_value.split(",")
+        if x.strip()
+    ] + [
         x.strip().lower()
         for x in config["excluded_terms"].split(",")
         if x.strip()
-    ] + list(EARLY_CAREER_EXCLUSIONS)
-    role_hits = [term for term in role_terms if term in title_lower]
-    senior_hits = [term for term in excluded if term in title_lower]
+    ] + [term.strip().lower() for term in EARLY_CAREER_EXCLUSIONS]
+    role_hits = [
+        pattern for pattern in include_patterns
+        if fnmatch.fnmatchcase(title_lower, f"*{pattern.strip('*')}*")
+    ]
+    senior_hits = [
+        pattern for pattern in exclude_patterns
+        if fnmatch.fnmatchcase(
+            title_lower,
+            pattern if "*" in pattern else f"*{pattern}*",
+        )
+    ]
     europe = (
         any(country in location_lower for country in EUROPE)
         or any(city in location_lower for city in EUROPE_CITIES)
@@ -414,7 +464,18 @@ def run_search(dry_run=False) -> dict:
                     matched += 1
                     totals["matched"] += 1
                     if not dry_run:
-                        jid = job_id(source["id"], normalized["source_job_id"], normalized["url"])
+                        key, jid = listing_identity(normalized["url"])
+                        seen = db.execute(
+                            "SELECT id, state FROM listing_keys WHERE key=?",
+                            (key,),
+                        ).fetchone()
+                        if seen:
+                            continue
+                        db.execute(
+                            """INSERT INTO listing_keys(id, key, state, first_seen_at, updated_at)
+                               VALUES(?, ?, 'discovery', ?, ?)""",
+                            (jid, key, now(), now()),
+                        )
                         existing = db.execute("SELECT id FROM jobs WHERE id=?", (jid,)).fetchone()
                         db.execute(
                             """INSERT INTO jobs(id, source_id, company_id, source_job_id, title, location, description,
@@ -605,6 +666,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_static("index.html", "text/html; charset=utf-8")
         if self.path in ("/config", "/config.html"):
             return self.send_static("config.html", "text/html; charset=utf-8")
+        if self.path in ("/saved", "/saved.html", "/saved-jobs"):
+            return self.send_static("saved.html", "text/html; charset=utf-8")
         if self.path == "/app.js":
             return self.send_static("app.js", "text/javascript; charset=utf-8")
         if self.path == "/styles.css":
@@ -631,15 +694,31 @@ class Handler(BaseHTTPRequestHandler):
                     item["sources"] = json.loads(item["sources"] or "[]")
                     result.append(item)
                 return json_response(self, result)
-            if parsed.path == "/api/jobs":
+            if parsed.path in ("/api/discovery", "/api/jobs"):
                 query = "SELECT j.*, c.name company_name, s.url source_url FROM jobs j JOIN companies c ON c.id=j.company_id JOIN job_sources s ON s.id=j.source_id"
                 params = []
                 status = urllib.parse.parse_qs(parsed.query).get("status", [""])[0]
                 if status:
                     query += " WHERE j.status=?"
                     params.append(status)
+                else:
+                    query += " WHERE j.status='new'"
                 query += " ORDER BY j.score DESC, j.posted_at DESC"
                 rows = db.execute(query, params).fetchall()
+                result = []
+                for row in rows:
+                    item = dict(row)
+                    item["match_reasons"] = json.loads(item["match_reasons"])
+                    result.append(item)
+                return json_response(self, result)
+            if parsed.path == "/api/saved":
+                rows = db.execute(
+                    """SELECT j.*, c.name company_name, s.url source_url
+                       FROM jobs j JOIN companies c ON c.id=j.company_id
+                       JOIN job_sources s ON s.id=j.source_id
+                       WHERE j.status='saved'
+                       ORDER BY j.fetched_at DESC"""
+                ).fetchall()
                 result = []
                 for row in rows:
                     item = dict(row)
@@ -685,12 +764,26 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/jobs/") and path.endswith("/status"):
                 jid = path.split("/")[3]
                 status = payload.get("status")
-                if status not in {"new", "reviewed", "saved", "rejected", "archived"}:
+                if status not in {"new", "saved", "discarded", "archived"}:
                     raise ValueError("invalid status")
-                if not db.execute("SELECT 1 FROM jobs WHERE id=?", (jid,)).fetchone():
+                job = db.execute("SELECT canonical_url FROM jobs WHERE id=?", (jid,)).fetchone()
+                if not job:
                     raise ValueError("job not found")
-                db.execute("UPDATE jobs SET status=? WHERE id=?", (status, jid))
-                db.execute("INSERT INTO job_status_history(job_id, status, changed_at) VALUES(?,?,?)", (jid, status, now()))
+                key = canonical_url(job["canonical_url"])
+                if status in {"discarded", "archived"}:
+                    db.execute(
+                        "UPDATE listing_keys SET state='discarded', updated_at=? WHERE key=?",
+                        (now(), key),
+                    )
+                    db.execute("DELETE FROM job_status_history WHERE job_id=?", (jid,))
+                    db.execute("DELETE FROM jobs WHERE id=?", (jid,))
+                else:
+                    db.execute("UPDATE jobs SET status=? WHERE id=?", ("saved" if status == "saved" else "new", jid))
+                    db.execute(
+                        "UPDATE listing_keys SET state=?, updated_at=? WHERE key=?",
+                        ("saved" if status == "saved" else "discovery", now(), key),
+                    )
+                    db.execute("INSERT INTO job_status_history(job_id, status, changed_at) VALUES(?,?,?)", (jid, status, now()))
                 db.commit()
                 db.close()
                 return json_response(self, {"ok": True})
@@ -776,11 +869,19 @@ class Handler(BaseHTTPRequestHandler):
                 db.close()
                 return json_response(self, {"ok": True}, HTTPStatus.CREATED)
             if path == "/api/config":
+                current = db.execute("SELECT * FROM search_config WHERE id=1").fetchone()
                 db.execute(
-                    "UPDATE search_config SET locations=?, role_terms=?, excluded_terms=?, max_age_days=?, schedule=? WHERE id=1",
-                    (str(payload.get("locations", "")), str(payload.get("role_terms", "")),
-                     str(payload.get("excluded_terms", "")), int(payload.get("max_age_days", 30)),
-                     str(payload.get("schedule", "00:00"))),
+                    """UPDATE search_config SET locations=?, role_terms=?, excluded_terms=?,
+                       include_terms=?, exclude_terms=?, max_age_days=?, schedule=? WHERE id=1""",
+                    (
+                        str(payload.get("locations", current["locations"])),
+                        str(payload.get("role_terms", current["role_terms"])),
+                        str(payload.get("excluded_terms", current["excluded_terms"])),
+                        str(payload.get("include_terms", current["include_terms"])),
+                        str(payload.get("exclude_terms", current["exclude_terms"])),
+                        int(payload.get("max_age_days", current["max_age_days"])),
+                        str(payload.get("schedule", current["schedule"])),
+                    ),
                 )
                 db.commit()
                 db.close()
