@@ -170,6 +170,45 @@ p {
   margin: 0 24px 20px;
 }
 
+.jobs-toolbar {
+  gap: 14px;
+}
+
+.job-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.job-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.job-controls input,
+.job-controls select {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.job-controls input {
+  width: 250px;
+}
+
+.job-controls select {
+  width: 160px;
+}
+
 .tabs {
   display: flex;
   gap: 5px;
@@ -466,6 +505,22 @@ p {
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .job-controls {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .job-controls label {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .job-controls input,
+  .job-controls select {
+    width: 100%;
   }
 
   .config-head {

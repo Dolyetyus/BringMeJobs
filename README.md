@@ -28,5 +28,9 @@ by Git.
 
 BringMeJobs does not submit applications for now.
 
-For Windows startup, register `scripts/windows-startup.ps1` in Task Scheduler.
-Adjust the WSL distro and repository path in the script if needed.
+The Windows **BringMeJobs** logon task starts the web interface, waits until
+it responds, waits another 60 seconds, and then scans configured career
+sources. Re-register it with
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/register-windows-startup.ps1`.
+Adjust the WSL distro and repository path in `scripts/windows-startup.ps1` if
+needed.

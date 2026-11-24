@@ -11,7 +11,20 @@
   <main>
     <section class="hero"><div><h2>Find the roles worth your attention.</h2><p>European engineering jobs from your configured sources.</p></div><div class="stats"><strong id="job-count">0</strong><span>matching jobs</span></div></section>
     <div id="notice" class="notice" hidden></div>
-    <section class="toolbar"><span></span><button id="refresh" class="secondary">Refresh</button></section>
+    <section class="toolbar jobs-toolbar">
+      <div class="job-controls">
+        <label>Filter jobs<input id="job-search" type="search" placeholder="Title, company, or location"></label>
+        <label>Sort by
+          <select id="job-sort">
+            <option value="posted-desc">Newest posted</option>
+            <option value="posted-asc">Oldest posted</option>
+            <option value="score-desc">Best match</option>
+            <option value="company-asc">Company A to Z</option>
+          </select>
+        </label>
+      </div>
+      <button id="refresh" class="secondary">Refresh</button>
+    </section>
     <section id="jobs" class="jobs"></section>
     <section class="panel"><div class="panel-heading"><h3>Recent search runs</h3></div><div id="runs"></div></section>
   </main>

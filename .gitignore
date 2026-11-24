@@ -5,6 +5,7 @@
 # Local planning documents
 INITIAL_PRODUCT.md
 BUILD_PLAN.md
+TODO.md
 
 *.db
 *.sqlite

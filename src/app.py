@@ -256,7 +256,8 @@ def parse_date(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
     except ValueError:
         return None
 
@@ -275,6 +276,73 @@ def source_jobs(source: sqlite3.Row, since: datetime) -> list[dict]:
              "posted_at": now()},
         ]
     parsed_source_url = urllib.parse.urlsplit(source["url"])
+    path_segments = [segment for segment in parsed_source_url.path.split("/") if segment]
+    request_headers = {
+        "User-Agent": "BringMeJobs/0.1",
+        "Accept": "application/json",
+    }
+
+    if parsed_source_url.hostname == "jobs.ashbyhq.com" and path_segments:
+        board_name = path_segments[0]
+        endpoint = f"https://api.ashbyhq.com/posting-api/job-board/{urllib.parse.quote(board_name, safe='')}"
+        request = urllib.request.Request(endpoint, headers=request_headers)
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read())
+        postings = payload.get("jobs", [])
+        if not postings:
+            raise ValueError("Ashby board returned no job listings")
+        return [
+            {
+                "id": posting.get("id"),
+                "title": posting.get("title", ""),
+                "location": ", ".join(filter(None, [
+                    posting.get("location", ""),
+                    *[
+                        item.get("location", "")
+                        for item in posting.get("secondaryLocations", [])
+                        if isinstance(item, dict)
+                    ],
+                ])),
+                "description": posting.get("descriptionPlain") or posting.get("descriptionHtml", ""),
+                "url": posting.get("jobUrl") or posting.get("applyUrl", source["url"]),
+                "posted_at": posting.get("publishedAt") or now(),
+            }
+            for posting in postings
+        ]
+
+    if parsed_source_url.hostname == "apply.workable.com" and path_segments:
+        account = path_segments[0]
+        endpoint = f"https://www.workable.com/api/accounts/{urllib.parse.quote(account, safe='')}?details=true"
+        request = urllib.request.Request(endpoint, headers=request_headers)
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read())
+        postings = payload.get("jobs", []) if isinstance(payload, dict) else []
+        if not postings:
+            raise ValueError("Workable public board returned no job listings")
+        return [
+            {
+                "id": posting.get("shortcode") or posting.get("code"),
+                "title": posting.get("title", ""),
+                "location": ", ".join(
+                    ", ".join(filter(None, [
+                        item.get("city", ""),
+                        item.get("region", ""),
+                        item.get("country", ""),
+                    ]))
+                    for item in posting.get("locations", [])
+                    if isinstance(item, dict) and not item.get("hidden", False)
+                ) or ", ".join(filter(None, [
+                    posting.get("city", ""),
+                    posting.get("state", ""),
+                    posting.get("country", ""),
+                ])) or ("Remote Europe" if posting.get("telecommuting") else ""),
+                "description": posting.get("description", ""),
+                "url": posting.get("url") or posting.get("shortlink") or source["url"],
+                "posted_at": posting.get("published_on") or posting.get("created_at") or now(),
+            }
+            for posting in postings
+        ]
+
     if source["source_type"] == "careers" and parsed_source_url.hostname == "www.palantir.com":
         endpoint = "https://www.palantir.com/api/lever/v1/postings?state=published"
         postings = []
@@ -302,7 +370,7 @@ def source_jobs(source: sqlite3.Row, since: datetime) -> list[dict]:
             }
             for posting in postings
         ]
-    request = urllib.request.Request(source["url"], headers={"User-Agent": "BringMeJobs/0.1"})
+    request = urllib.request.Request(source["url"], headers=request_headers)
     with urllib.request.urlopen(request, timeout=15) as response:
         body = response.read()
         content_type = response.headers.get("Content-Type", "")
@@ -336,11 +404,33 @@ def source_jobs(source: sqlite3.Row, since: datetime) -> list[dict]:
         data = []
         for block in parser.blocks:
             values = block if isinstance(block, list) else block.get("@graph", [block]) if isinstance(block, dict) else []
-            data.extend(item for item in values if isinstance(item, dict) and item.get("@type") in ("JobPosting", ["JobPosting"]))
+            data.extend(
+                item for item in values
+                if isinstance(item, dict)
+                and "JobPosting" in (
+                    item.get("@type", [])
+                    if isinstance(item.get("@type"), list)
+                    else [item.get("@type")]
+                )
+            )
+        if not data:
+            raise ValueError(
+                "page loaded but exposed no JSON-LD JobPosting data; a source-specific connector is required"
+            )
         return [
             {"id": item.get("identifier", {}).get("value", item.get("url", "")) if isinstance(item.get("identifier"), dict) else item.get("url", ""),
-             "title": item.get("title", ""), "location": item.get("jobLocation", {}).get("address", {}).get("addressLocality", "")
-             if isinstance(item.get("jobLocation"), dict) else str(item.get("jobLocation", "")),
+             "title": item.get("title", ""), "location": ", ".join(
+                 str(location.get("address", {}).get("addressCountry", ""))
+                 for location in (
+                     item.get("jobLocation", [])
+                     if isinstance(item.get("jobLocation"), list)
+                     else [item.get("jobLocation", {})]
+                 )
+                 if isinstance(location, dict)
+             ) or (
+                 item.get("jobLocation", {}).get("address", {}).get("addressLocality", "")
+                 if isinstance(item.get("jobLocation"), dict) else ""
+             ),
              "description": item.get("description", ""), "url": item.get("url", source["url"]),
              "posted_at": item.get("datePosted", now())} for item in data
         ]
@@ -348,8 +438,12 @@ def source_jobs(source: sqlite3.Row, since: datetime) -> list[dict]:
         data = json.loads(body)
     except json.JSONDecodeError as exc:
         raise ValueError("source must return JSON or JSON-LD JobPosting data") from exc
+    if isinstance(data, dict):
+        data = data.get("jobs", data.get("data", []))
     if not isinstance(data, list):
         raise ValueError("JSON source must return an array of job objects")
+    if not data:
+        raise ValueError("JSON source returned no job listings")
     return data
 
 
@@ -398,9 +492,6 @@ def normalize_and_match(raw: dict, source: sqlite3.Row, config: sqlite3.Row) -> 
     reasons = [f"role: {', '.join(role_hits[:3])}", "location: Europe"]
     score = min(100, 50 + len(role_hits) * 10)
     posted = str(raw.get("posted_at") or raw.get("updated_at") or now())
-    posted_dt = parse_date(posted)
-    if posted_dt and posted_dt < datetime.now(timezone.utc) - timedelta(days=int(config["max_age_days"])):
-        return None
     source_job_id = str(raw.get("id") or hashlib.sha256(url.encode()).hexdigest()[:16])
     return {
         "source_job_id": source_job_id, "title": title, "location": location,
@@ -428,7 +519,8 @@ def run_search(dry_run=False) -> dict:
         config = db.execute("SELECT * FROM search_config WHERE id=1").fetchone()
         sources = db.execute(
             """SELECT s.*, c.name company_name FROM job_sources s JOIN companies c ON c.id=s.company_id
-               WHERE s.enabled=1 AND c.enabled=1"""
+               WHERE s.enabled=1 AND c.enabled=1
+               ORDER BY lower(c.name), s.id"""
         ).fetchall()
         since = datetime.now(timezone.utc) - timedelta(days=int(config["max_age_days"]))
         log_run(

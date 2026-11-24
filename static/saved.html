@@ -25,6 +25,19 @@
       </div>
     </section>
     <div id="notice" class="notice" hidden></div>
+    <section class="toolbar jobs-toolbar">
+      <div class="job-controls">
+        <label>Filter jobs<input id="job-search" type="search" placeholder="Title, company, or location"></label>
+        <label>Sort by
+          <select id="job-sort">
+            <option value="posted-desc">Newest posted</option>
+            <option value="posted-asc">Oldest posted</option>
+            <option value="score-desc">Best match</option>
+            <option value="company-asc">Company A to Z</option>
+          </select>
+        </label>
+      </div>
+    </section>
     <section id="saved-jobs" class="jobs"></section>
   </main>
   <script src="/app.js"></script>

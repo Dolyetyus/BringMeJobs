@@ -2,6 +2,8 @@ const state = {
   status: "",
   companies: [],
   deleted: [],
+  jobs: [],
+  savedJobs: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -36,38 +38,97 @@ function show(message) {
   notice.hidden = !message;
 }
 
-async function loadJobs() {
-  const jobs = await api("/api/discovery");
+function filteredAndSortedJobs(jobs) {
+  const search = ($("#job-search")?.value || "").trim().toLocaleLowerCase();
+  const sort = $("#job-sort")?.value || "posted-desc";
+  const filtered = jobs.filter((job) => {
+    const searchable = [job.title, job.company_name, job.location]
+      .filter(Boolean)
+      .join(" ")
+      .toLocaleLowerCase();
+    return searchable.includes(search);
+  });
 
-  $("#job-count").textContent = jobs.length;
-  $("#jobs").innerHTML = jobs.length
-    ? jobs.map((job) => `
+  return filtered.sort((first, second) => {
+    if (sort === "company-asc") {
+      return first.company_name.localeCompare(second.company_name);
+    }
+
+    if (sort === "score-desc") {
+      return (second.score || 0) - (first.score || 0);
+    }
+
+    const firstDate = Date.parse(first.posted_at || "");
+    const secondDate = Date.parse(second.posted_at || "");
+    const firstHasDate = Number.isFinite(firstDate);
+    const secondHasDate = Number.isFinite(secondDate);
+
+    if (firstHasDate !== secondHasDate) {
+      return firstHasDate ? -1 : 1;
+    }
+
+    if (!firstHasDate) {
+      return 0;
+    }
+
+    return sort === "posted-asc"
+      ? firstDate - secondDate
+      : secondDate - firstDate;
+  });
+}
+
+function formatPostedDate(value) {
+  return value ? String(value).slice(0, 10) : "Date unknown";
+}
+
+function renderJobs(jobs, container, saved = false) {
+  const visibleJobs = filteredAndSortedJobs(jobs);
+
+  if (container.id === "jobs") {
+    $("#job-count").textContent = visibleJobs.length;
+  }
+
+  container.innerHTML = visibleJobs.length
+    ? visibleJobs.map((job) => `
       <article class="card">
         <div class="card-head">
           <span class="company-name">${escapeHtml(job.company_name)}</span>
-          <span class="score">${job.score}/100</span>
+          ${saved ? "" : `<span class="score">${job.score}/100</span>`}
         </div>
         <h3>${escapeHtml(job.title)}</h3>
         <div class="meta">
-          ${escapeHtml(job.location)} · posted ${escapeHtml((job.posted_at || "").slice(0, 10))}
+          ${escapeHtml(job.location)} · posted ${escapeHtml(formatPostedDate(job.posted_at))}
         </div>
-        <div class="reasons">
-          ${job.match_reasons.map((reason) => `<span class="pill">${escapeHtml(reason)}</span>`).join("")}
-        </div>
+        ${saved ? "" : `<div class="reasons">
+          ${(job.match_reasons || []).map((reason) => `<span class="pill">${escapeHtml(reason)}</span>`).join("")}
+        </div>`}
         <p class="muted">${escapeHtml(job.description).slice(0, 180)}</p>
         <div class="actions">
           <a href="${escapeHtml(job.url)}" target="_blank" rel="noreferrer">Open listing</a>
-          <button data-job="${escapeHtml(job.id)}" data-status="saved">Save</button>
-          <button data-job="${escapeHtml(job.id)}" data-status="discarded">Discard</button>
+          ${saved
+            ? `<button data-job="${escapeHtml(job.id)}" data-status="discarded">Discard</button>`
+            : `<button data-job="${escapeHtml(job.id)}" data-status="saved">Save</button>
+              <button data-job="${escapeHtml(job.id)}" data-status="discarded">Discard</button>`}
         </div>
       </article>
     `).join("")
     : `
       <div class="card">
-        <h3>No matching jobs yet</h3>
-        <p class="muted">Run a search or configure a careers source.</p>
+        <h3>${jobs.length ? "No jobs match your filters" : saved ? "No saved jobs" : "No matching jobs yet"}</h3>
+        <p class="muted">
+          ${jobs.length
+            ? "Try a different search or sort option."
+            : saved
+              ? "Saved listings will appear here."
+              : "Run a search or configure a careers source."}
+        </p>
       </div>
     `;
+}
+
+async function loadJobs() {
+  state.jobs = await api("/api/discovery");
+  renderJobs(state.jobs, $("#jobs"));
 }
 
 async function setStatus(id, status) {
@@ -83,31 +144,8 @@ async function setStatus(id, status) {
 }
 
 async function loadSaved() {
-  const jobs = await api("/api/saved");
-  const container = $("#saved-jobs");
-
-  container.innerHTML = jobs.length
-    ? jobs.map((job) => `
-      <article class="card">
-        <div class="card-head">
-          <span class="company-name">${escapeHtml(job.company_name)}</span>
-        </div>
-        <h3>${escapeHtml(job.title)}</h3>
-        <div class="meta">${escapeHtml(job.location)}</div>
-        <p class="muted">${escapeHtml(job.description).slice(0, 180)}</p>
-        <div class="actions">
-          <a href="${escapeHtml(job.url)}" target="_blank" rel="noreferrer">Open listing</a>
-          <button data-job="${escapeHtml(job.id)}" data-status="discarded">Discard</button>
-        </div>
-      </article>
-    `).join("")
-    : `
-      <div class="card">
-        <h3>No saved jobs</h3>
-        <p class="muted">Saved listings will appear here.</p>
-      </div>
-    `;
-
+  state.savedJobs = await api("/api/saved");
+  renderJobs(state.savedJobs, $("#saved-jobs"), true);
 }
 
 async function loadRuns() {
@@ -307,6 +345,9 @@ function setupConfig() {
 function setupDashboard() {
   refreshDashboard();
 
+  $("#job-search").addEventListener("input", () => renderJobs(state.jobs, $("#jobs")));
+  $("#job-sort").addEventListener("change", () => renderJobs(state.jobs, $("#jobs")));
+
   $("#run-search").onclick = async () => {
     $("#run-search").disabled = true;
     show("Search running…");
@@ -357,6 +398,8 @@ function setupDashboard() {
 
 function setupSaved() {
   loadSaved().catch((error) => show(error.message));
+  $("#job-search").addEventListener("input", () => renderJobs(state.savedJobs, $("#saved-jobs"), true));
+  $("#job-sort").addEventListener("change", () => renderJobs(state.savedJobs, $("#saved-jobs"), true));
   $("#saved-jobs").addEventListener("click", (event) => {
     const button = event.target.closest("[data-job]");
     if (button) {
